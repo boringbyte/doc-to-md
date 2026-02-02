@@ -215,11 +215,17 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# VS Code specific
+# IDEs
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
 build/
 *.egg-info/
-__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
 
 # Output
 output/
