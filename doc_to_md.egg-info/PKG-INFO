@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: doc-to-md
+Version: 0.1.0
+Summary: PDF to Markdown conversion optimized for RAG applications
+Author-email: Your Name <you@example.com>
+License: MIT
+Keywords: pdf,markdown,rag,llm,document-processing
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Text Processing :: Markup :: Markdown
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pymupdf>=1.23.0
+Requires-Dist: pymupdf4llm>=0.0.5
+Requires-Dist: pymupdf-layout
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"

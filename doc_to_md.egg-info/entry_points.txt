@@ -1,0 +1,2 @@
+[console_scripts]
+doc-to-md = doc_to_md.cli:main
