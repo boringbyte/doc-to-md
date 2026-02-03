@@ -5,7 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
-from .pipeline import ConversionPipeline, PipelineConfig
+from .pipeline import DocToMd, ConversionPipeline, PipelineConfig
 from .post_processing import SegmenterConfig
 
 
@@ -36,22 +36,16 @@ def cmd_convert(args: argparse.Namespace) -> int:
     else:
         output_path = pdf_path.with_suffix('.md')
     
-    # Configure pipeline
-    segmenter_config = SegmenterConfig(
-        target_chunk_size=args.chunk_size,
+    # Configure pipeline using simplified API
+    pipeline = DocToMd(
+        chunk_size=args.chunk_size,
         max_chunk_size=args.max_chunk_size,
-    )
-    
-    config = PipelineConfig(
-        segmenter_config=segmenter_config,
         output_format=args.format,
         include_frontmatter=not args.no_frontmatter,
     )
     
-    pipeline = ConversionPipeline(config)
-    
     try:
-        result_path = pipeline.convert_to_file(pdf_path, output_path)
+        result_path = pipeline.run(pdf_path, output_path)
         logger.info(f"[OK] Converted: {pdf_path.name} -> {result_path.name}")
         return 0
     except Exception as e:
@@ -73,12 +67,11 @@ def cmd_batch(args: argparse.Namespace) -> int:
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    config = PipelineConfig(
+    # Configure pipeline using simplified API
+    pipeline = DocToMd(
         output_format=args.format,
         include_frontmatter=not args.no_frontmatter,
     )
-    
-    pipeline = ConversionPipeline(config)
     
     pdf_files = list(input_dir.glob("*.pdf"))
     if not pdf_files:
@@ -89,9 +82,8 @@ def cmd_batch(args: argparse.Namespace) -> int:
     
     success_count = 0
     for pdf_file in pdf_files:
-        output_path = output_dir / pdf_file.stem
         try:
-            result_path = pipeline.convert_to_file(pdf_file, output_path)
+            result_path = pipeline.run(pdf_file, output_dir / pdf_file.stem)
             logger.info(f"[OK] {pdf_file.name}")
             success_count += 1
         except Exception as e:

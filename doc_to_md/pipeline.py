@@ -55,11 +55,10 @@ class PipelineConfig:
     
     # Processing flags
     extract_toc: bool = True
-    process_tables: bool = True
     segment_content: bool = True
     enrich_metadata: bool = True
     
-    # Post-processing flags (NEW)
+    # Post-processing flags
     run_cleanup: bool = True
     fix_headings: bool = True
     fix_links: bool = True
@@ -67,25 +66,35 @@ class PipelineConfig:
     run_whitespace_norm: bool = True
 
 
-class ConversionPipeline:
-    """Orchestrates the PDF to Markdown conversion process.
+class DocToMd:
+    """Simplified entry point for PDF to Markdown conversion.
     
-    Pipeline stages:
-    1. PDF Conversion - Extract raw markdown, TOC, tables
-    2. TOC Processing - Build hierarchical section structure
-    3. Table Processing - Validate and enrich tables
-    4. Content Segmentation - Split into RAG-optimized chunks
-    5. Metadata Enrichment - Add labels and statistics
-    6. Output Generation - Produce final markdown
+    This class can be initialized with all configuration options and then
+    run on input files/directories.
     """
     
-    def __init__(self, config: Optional[PipelineConfig] = None):
-        """Initialize the pipeline.
+    def __init__(self, config: Optional[PipelineConfig] = None, **kwargs):
+        """Initialize with config or individual options.
         
         Args:
-            config: Pipeline configuration.
+            config: Optional PipelineConfig object.
+            **kwargs: Direct configuration options (e.g., segment_content=True, chunk_size=3000).
         """
-        self.config = config or PipelineConfig()
+        if config:
+            self.config = config
+        else:
+            # Handle flattened segmenter config if provided
+            segmenter_args = {}
+            if 'chunk_size' in kwargs:
+                segmenter_args['target_chunk_size'] = kwargs.pop('chunk_size')
+            if 'max_chunk_size' in kwargs:
+                segmenter_args['max_chunk_size'] = kwargs.pop('max_chunk_size')
+            
+            if segmenter_args:
+                kwargs['segmenter_config'] = SegmenterConfig(**segmenter_args)
+            
+            self.config = PipelineConfig(**kwargs)
+            
         self._converter: Optional[PDFConverterBase] = None
     
     @property
@@ -117,8 +126,8 @@ class ConversionPipeline:
         # Stage 2: TOC Processing
         if self.config.extract_toc and result.toc:
             logger.info("Stage 2: Processing table of contents")
-            toc_processor = TOCProcessor(result.toc)
-            # TOC is already in result, processor is for section lookups
+            # This just verifies the TOC can be processed
+            TOCProcessor(result.toc)
         
         # === MARKDOWN CLEANUP PROCESSING STAGES ===
         
@@ -141,20 +150,19 @@ class ConversionPipeline:
             result.markdown = code_fixer.fix_code_blocks(result.markdown)
         
         # Stage 6: Cleanup (whitespace normalization, page artifacts)
-        # Run this last to clean up any artifacts from previous stages
         if self.config.run_cleanup:
             logger.info("Stage 6: Cleaning up markdown")
             cleanup = MarkdownCleanup(self.config.cleanup_config)
             result.markdown = cleanup.clean(result.markdown)
-
+ 
         # Stage 7: Whitespace Normalization
         if self.config.run_whitespace_norm:
             logger.info("Stage 7: Normalizing whitespace")
             whitespace_norm = WhitespaceNormalizer(self.config.whitespace_config)
             result.markdown = whitespace_norm.normalize(result.markdown)
-
+ 
         # === POST MARKDOWN PROCESSING STAGES ===
-
+ 
         # Stage 8: Content Segmentation
         if self.config.segment_content:
             logger.info("Stage 8: Segmenting content")
@@ -178,32 +186,48 @@ class ConversionPipeline:
         logger.info("Conversion complete")
         return result
     
+    def run(
+        self,
+        input_path: Union[str, Path],
+        output_path: Optional[Union[str, Path]] = None,
+        output_format: Optional[str] = None
+    ) -> Path:
+        """High-level run method that saves result to file.
+        
+        Args:
+            input_path: Path to input PDF.
+            output_path: Optional output path.
+            output_format: Optional format override (markdown/json).
+            
+        Returns:
+            Path to the created file.
+        """
+        input_path = Path(input_path)
+        output_format = output_format or self.config.output_format
+        
+        if output_path:
+            output_path = Path(output_path)
+        else:
+            suffix = '.json' if output_format == 'json' else '.md'
+            output_path = input_path.with_suffix(suffix)
+            
+        return self.convert_to_file(input_path, output_path, output_format)
+
     def convert_to_file(
         self,
         pdf_path: Union[str, Path],
         output_path: Union[str, Path],
         output_format: Optional[str] = None
     ) -> Path:
-        """Convert PDF and save to file.
-        
-        Args:
-            pdf_path: Path to input PDF.
-            output_path: Path for output file.
-            output_format: Override output format (markdown/json).
-            
-        Returns:
-            Path to created output file.
-        """
+        """Internal helper to convert and write to specific file."""
         result = self.convert(pdf_path)
         output_path = Path(output_path)
         output_format = output_format or self.config.output_format
         
         if output_format == "json":
-            output_path = output_path.with_suffix('.json')
             with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(result.to_dict(), f, indent=2)
+                json.dump(result.to_dict(), f, indent=2, ensure_ascii=False)
         else:
-            output_path = output_path.with_suffix('.md')
             markdown = generate_markdown_output(
                 result.chunks if result.chunks else [],
                 result.metadata,
@@ -224,16 +248,7 @@ class ConversionPipeline:
         output_dir: Union[str, Path],
         pattern: str = "*.pdf"
     ) -> list[Path]:
-        """Convert all PDFs in a directory.
-        
-        Args:
-            input_dir: Directory containing PDFs.
-            output_dir: Directory for output files.
-            pattern: Glob pattern for PDF files.
-            
-        Returns:
-            List of created output paths.
-        """
+        """Convert all PDFs in a directory."""
         input_dir = Path(input_dir)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -243,7 +258,7 @@ class ConversionPipeline:
             output_name = pdf_file.stem
             output_path = output_dir / output_name
             try:
-                result_path = self.convert_to_file(pdf_file, output_path)
+                result_path = self.run(pdf_file, output_path)
                 output_paths.append(result_path)
             except Exception as e:
                 logger.error(f"Failed to convert {pdf_file}: {e}")
@@ -251,16 +266,13 @@ class ConversionPipeline:
         return output_paths
 
 
+# Alias for backward compatibility
+ConversionPipeline = DocToMd
+
+
 def quick_convert(pdf_path: Union[str, Path]) -> str:
-    """Quick conversion function for simple use cases.
-    
-    Args:
-        pdf_path: Path to PDF file.
-        
-    Returns:
-        Converted markdown string.
-    """
-    pipeline = ConversionPipeline()
+    """Quick conversion function for simple use cases."""
+    pipeline = DocToMd()
     result = pipeline.convert(pdf_path)
     
     if result.chunks:
