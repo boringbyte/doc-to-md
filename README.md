@@ -1,6 +1,6 @@
 # Doc-to-MD: RAG-Optimized PDF to Markdown Converter
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Doc-to-MD** is a powerful PDF to Markdown conversion pipeline specifically engineered for high-accuracy **RAG (Retrieval-Augmented Generation)** applications. It doesn't just extract text; it preserves document hierarchy, optimizes segmentation, and enriches content with semantic metadata.
@@ -15,7 +15,6 @@ Standard PDF-to-text converters often fail RAG systems by creating cross-boundar
 - 🧩 **Semantic Segmentation**: Splits documents at logical section boundaries rather than arbitrary character limits.
 - 🏷️ **Metadata Enrichment**: Injects section paths, content types, and semantic labels into every chunk.
 - 🧹 **Intelligent Cleanup**: Strips PDF artifacts (footers, page numbers, dots leaders) and normalizes malformed lists/bullets.
-- 📊 **Table Optimization**: Preserves table structure and removes internal PDF artifacts like "(continued)" labels.
 
 ---
 
