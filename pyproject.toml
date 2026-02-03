@@ -21,8 +21,9 @@ classifiers = [
 
 dependencies = [
     "pymupdf",
-    "pymupdf4llm",
-    "pymupdf-layout",
+    "pymupdf4llm>=0.2.9",
+    "pymupdf-layout>=1.26.6",
+    "pytest>=8.0.0",
 ]
 
 [project.optional-dependencies]
