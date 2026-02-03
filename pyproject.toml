@@ -1,6 +1,6 @@
 [project]
 name = "doc-to-md"
-version = "0.1.0"
+version = "0.2.0"
 description = "PDF to Markdown conversion optimized for RAG applications"
 readme = "README.md"
 requires-python = ">=3.12"
