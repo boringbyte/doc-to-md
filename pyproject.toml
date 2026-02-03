@@ -3,10 +3,10 @@ name = "doc-to-md"
 version = "0.1.0"
 description = "PDF to Markdown conversion optimized for RAG applications"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "you@example.com"}
+    {name = "Boring Byte"}
 ]
 keywords = ["pdf", "markdown", "rag", "llm", "document-processing"]
 classifiers = [
@@ -14,16 +14,14 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Text Processing :: Markup :: Markdown",
 ]
 
 dependencies = [
-    "pymupdf>=1.23.0",
-    "pymupdf4llm>=0.0.5",
+    "pymupdf",
+    "pymupdf4llm",
     "pymupdf-layout",
 ]
 
@@ -47,7 +45,7 @@ include = ["doc_to_md*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

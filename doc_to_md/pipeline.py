@@ -11,14 +11,11 @@ from .post_processing import (
     MetadataEnricherConfig,
     SegmenterConfig,
     StructureAwareSegmenter,
-    TableProcessor,
-    TableProcessorConfig,
     TOCProcessor,
     generate_markdown_output,
 )
 from .post_processing.markdown_cleanup import MarkdownCleanup, CleanupConfig
 from .post_processing.heading_fixer import HeadingFixer, HeadingFixerConfig
-from .post_processing.table_merger import TableMerger, TableMergerConfig
 from .post_processing.link_fixer import LinkFixer, LinkFixerConfig
 from .post_processing.code_block_fixer import CodeBlockFixer, CodeBlockFixerConfig
 from .post_processing.whitespace_normalizer import WhitespaceNormalizer, WhitespaceConfig
@@ -42,16 +39,12 @@ class PipelineConfig:
     # Segmentation settings
     segmenter_config: SegmenterConfig = field(default_factory=SegmenterConfig)
     
-    # Table processing settings
-    table_config: TableProcessorConfig = field(default_factory=TableProcessorConfig)
-    
     # Metadata enrichment settings
     metadata_config: MetadataEnricherConfig = field(default_factory=MetadataEnricherConfig)
     
     # Post-processing settings
     cleanup_config: CleanupConfig = field(default_factory=CleanupConfig)
     heading_fixer_config: HeadingFixerConfig = field(default_factory=HeadingFixerConfig)
-    table_merger_config: TableMergerConfig = field(default_factory=TableMergerConfig)
     link_fixer_config: LinkFixerConfig = field(default_factory=LinkFixerConfig)
     code_block_config: CodeBlockFixerConfig = field(default_factory=CodeBlockFixerConfig)
     whitespace_config: WhitespaceConfig = field(default_factory=WhitespaceConfig)
@@ -69,7 +62,6 @@ class PipelineConfig:
     # Post-processing flags (NEW)
     run_cleanup: bool = True
     fix_headings: bool = True
-    merge_tables: bool = True
     fix_links: bool = True
     fix_code_blocks: bool = False  # Off by default, can be too aggressive
     run_whitespace_norm: bool = True
@@ -128,59 +120,44 @@ class ConversionPipeline:
             toc_processor = TOCProcessor(result.toc)
             # TOC is already in result, processor is for section lookups
         
-        # Stage 3: Table Processing
-        if self.config.process_tables and result.tables:
-            logger.info("Stage 3: Processing tables")
-            table_processor = TableProcessor(self.config.table_config)
-            result.markdown, result.tables = table_processor.process_tables(
-                result.markdown, result.tables
-            )
+        # === MARKDOWN CLEANUP PROCESSING STAGES ===
         
-        # Stages 4 and 5 moved to the end to ensure they process cleaned content
-        
-        # === POST-PROCESSING STAGES ===
-        
-        # Stage 6: Merge split tables
-        if self.config.merge_tables:
-            logger.info("Stage 6: Merging split tables")
-            table_merger = TableMerger(self.config.table_merger_config)
-            result.markdown = table_merger.merge_tables(result.markdown)
-        
-        # Stage 7: Fix heading levels using TOC
+        # Stage 3: Fix heading levels using TOC
         if self.config.fix_headings and result.toc:
-            logger.info("Stage 7: Fixing heading levels from TOC")
+            logger.info("Stage 3: Fixing heading levels from TOC")
             heading_fixer = HeadingFixer(result.toc, self.config.heading_fixer_config)
             result.markdown = heading_fixer.fix_headings(result.markdown)
         
-        # Stage 8: Fix links
+        # Stage 4: Fix links
         if self.config.fix_links:
-            logger.info("Stage 8: Fixing links")
+            logger.info("Stage 4: Fixing links")
             link_fixer = LinkFixer(self.config.link_fixer_config)
             result.markdown = link_fixer.fix_links(result.markdown)
         
-        # Stage 9: Fix code blocks (optional, can be aggressive)
+        # Stage 5: Fix code blocks (optional, can be aggressive)
         if self.config.fix_code_blocks:
-            logger.info("Stage 9: Fixing code blocks")
+            logger.info("Stage 5: Fixing code blocks")
             code_fixer = CodeBlockFixer(self.config.code_block_config)
             result.markdown = code_fixer.fix_code_blocks(result.markdown)
         
-        # Stage 10: Cleanup (whitespace normalization, page artifacts)
+        # Stage 6: Cleanup (whitespace normalization, page artifacts)
         # Run this last to clean up any artifacts from previous stages
         if self.config.run_cleanup:
-            logger.info("Stage 10: Cleaning up markdown")
+            logger.info("Stage 6: Cleaning up markdown")
             cleanup = MarkdownCleanup(self.config.cleanup_config)
             result.markdown = cleanup.clean(result.markdown)
 
-        # Stage 11: Whitespace Normalization
+        # Stage 7: Whitespace Normalization
         if self.config.run_whitespace_norm:
-            logger.info("Stage 11: Normalizing whitespace")
+            logger.info("Stage 7: Normalizing whitespace")
             whitespace_norm = WhitespaceNormalizer(self.config.whitespace_config)
             result.markdown = whitespace_norm.normalize(result.markdown)
 
-        # Stage 12 (Formerly 4): Content Segmentation
-        # Moved after cleanup to ensure chunks contain clean text
+        # === POST MARKDOWN PROCESSING STAGES ===
+
+        # Stage 8: Content Segmentation
         if self.config.segment_content:
-            logger.info("Stage 12: Segmenting content")
+            logger.info("Stage 8: Segmenting content")
             toc_processor = TOCProcessor(result.toc) if result.toc else None
             segmenter = StructureAwareSegmenter(
                 toc_processor=toc_processor,
@@ -189,9 +166,9 @@ class ConversionPipeline:
             result.chunks = segmenter.segment(result.markdown)
             logger.info(f"Created {len(result.chunks)} chunks")
         
-        # Stage 13 (Formerly 5): Metadata Enrichment
+        # Stage 9: Metadata Enrichment
         if self.config.enrich_metadata and result.chunks:
-            logger.info("Stage 13: Enriching metadata")
+            logger.info("Stage 9: Enriching metadata")
             enricher = MetadataEnricher(
                 document_metadata=result.metadata,
                 config=self.config.metadata_config

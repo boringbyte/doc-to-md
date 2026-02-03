@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Union
 
+import pymupdf.layout
 import pymupdf
 import pymupdf4llm
 
@@ -43,6 +44,8 @@ class PyMuPDFConverter(PDFConverterBase):
             str(path),
             page_chunks=False,  # Get full document first
             write_images=False,  # Don't extract images for now
+            header=False,
+            footer=False,
         )
         
         # Extract TOC

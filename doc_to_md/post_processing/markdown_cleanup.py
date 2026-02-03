@@ -26,6 +26,8 @@ class CleanupConfig:
     cleanup_bold: bool = True
     # Trim trailing whitespace
     trim_trailing_whitespace: bool = True
+    # Remove redundant physical TOC pages
+    remove_redundant_toc: bool = True
 
 
 class MarkdownCleanup:
@@ -82,7 +84,11 @@ class MarkdownCleanup:
         if self.config.trim_trailing_whitespace:
             result = self._trim_trailing_whitespace(result)
         
-        # Step 7: Normalize bullets
+        # Step 7: Remove redundant TOC
+        if self.config.remove_redundant_toc:
+            result = self._remove_redundant_toc(result)
+        
+        # Step 8: Normalize bullets
         result = self._normalize_bullets(result)
         
         # Step 8: Normalize blank lines (do this last)
@@ -385,6 +391,59 @@ class MarkdownCleanup:
         """
         # Normalize various HR formats to ---
         result = re.sub(r'^[\-_\*]{3,}\s*$', '---', markdown, flags=re.MULTILINE)
+        return result
+    
+    def _remove_redundant_toc(self, markdown: str) -> str:
+        """Remove redundant physical TOC pages.
+        
+        Looks for lines with characteristic TOC patterns:
+        - Title text followed by dot leaders (....) and a page number
+        - Example: "**Chapter 1: About this document................ 9**"
+        - Merged entries: "Title 1... 10 Title 2... 11"
+        
+        Args:
+            markdown: Input markdown.
+            
+        Returns:
+            Markdown with redundant TOC lines removed.
+        """
+        # Global pattern for any line containing dot leaders and a page number anywhere
+        # This handles merged entries or entries with trailing text.
+        # We look for at least 5 dots.
+        toc_pattern = re.compile(r'^.*?\.\.\.\.\.+.*?\d+.*$', re.MULTILINE)
+        
+        # Also handle bold blocks that contain dot leaders
+        # Some TOC pages are entirely wrapped in bold.
+        def aggressive_toc_callback(match):
+            text = match.group(0)
+            # If the block has a dot leader sequence, it's likely part of a TOC
+            if '.....' in text:
+                # If it also contains a number (page number), we remove it
+                if re.search(r'\d+', text):
+                    logger.debug(f"Removing TOC-like block: {repr(text[:50])}...")
+                    return ""
+            return text
+
+        # Apply callback to both bold blocks and orphan lines
+        result = toc_pattern.sub('', markdown)
+        
+        # Handle the specific multi-title bold block with internal dots
+        result = re.sub(r'\*\*.*?\*\*', aggressive_toc_callback, result, flags=re.DOTALL)
+        
+        # Final cleanup for residual dot lines that might not have numbers but are garbage
+        result = re.sub(r'^\s*\.\.\.\.\.\.+\s*$', '', result, flags=re.MULTILINE)
+        
+        # Handle cases where dots and numbers are not in bold but are on same line
+        # e.g. "Some Title................................ 10 More Title................................ 11"
+        def merge_cleaner(line):
+            if '.....' in line and re.search(r'\d+', line):
+                return ""
+            return line
+            
+        lines = result.split('\n')
+        result_lines = [merge_cleaner(l) for l in lines]
+        result = '\n'.join(result_lines)
+        
         return result
     
     def _trim_trailing_whitespace(self, markdown: str) -> str:

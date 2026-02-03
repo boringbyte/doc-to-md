@@ -21,6 +21,8 @@ class HeadingFixerConfig:
     remove_bold_from_headings: bool = True
     # Whether to add missing headings from TOC
     add_missing_headings: bool = False
+    # Whether to bold headings not present in TOC
+    bold_non_toc_headings: bool = True
 
 
 class HeadingFixer:
@@ -100,6 +102,19 @@ class HeadingFixer:
         best_ratio = 0
         
         for toc_title, level in self._toc_map.items():
+            # Strict prefix check: Prevent "Figure X" or "Table X" from matching 
+            # section titles that don't have the prefix, even if they have high similarity.
+            prefixes = ['figure', 'table', 'prerequisites']
+            mismatched_prefix = False
+            for p in prefixes:
+                if (normalized.startswith(p) and not toc_title.startswith(p)) or \
+                   (toc_title.startswith(p) and not normalized.startswith(p)):
+                    mismatched_prefix = True
+                    break
+            
+            if mismatched_prefix:
+                continue
+
             ratio = SequenceMatcher(None, normalized, toc_title).ratio()
             if ratio > best_ratio and ratio >= self.config.min_match_ratio:
                 best_ratio = ratio
@@ -185,6 +200,10 @@ class HeadingFixer:
                     if old_line != line:
                         logger.debug(f"Fixing heading: '{old_line.strip()}' -> '{line.strip()}'")
                     is_modified = True
+                elif self.config.bold_non_toc_headings:
+                    # Not in TOC, convert to bold
+                    line = f"**{clean_text}**"
+                    logger.debug(f"Bolding non-TOC heading: '{heading_match.group(0).strip()}' -> '{line}'")
                 elif self.config.remove_bold_from_headings:
                     # Keep original level but clean text
                     line = f"{current_hashes} {clean_text}"
