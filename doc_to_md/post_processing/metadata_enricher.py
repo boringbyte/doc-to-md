@@ -98,6 +98,7 @@ class MetadataEnricher:
         
         # Section information
         lines.append(f"section_path: {chunk.section_path}")
+        lines.append(f"parent_section: \"{chunk.parent_section}\"")
         lines.append(f"section_level: {chunk.section_level}")
         
         # Navigation
@@ -113,7 +114,9 @@ class MetadataEnricher:
         
         # Position
         lines.append(f"chunk_index: {chunk.chunk_index}")
-        lines.append(f"page_number: {chunk.page_number}")
+        lines.append(f"page_start: {chunk.page_start}")
+        lines.append(f"page_end: {chunk.page_end}")
+        lines.append(f"page_range: \"{chunk.page_range}\"")
         
         # Word count
         if self.config.add_word_count:
@@ -207,6 +210,10 @@ def generate_markdown_output(
             doc_frontmatter.append(f'author: "{document_metadata.author}"')
         if document_metadata.source_file:
             doc_frontmatter.append(f'source: "{document_metadata.source_file}"')
+        if document_metadata.keywords:
+            keywords_list = [k.strip() for k in document_metadata.keywords.split(",")]
+            lines_str = ", ".join(keywords_list)
+            doc_frontmatter.append(f'keywords: "{lines_str}"')
         doc_frontmatter.append(f"page_count: {document_metadata.page_count}")
         doc_frontmatter.append(f"chunk_count: {len(chunks)}")
         doc_frontmatter.append("---")
@@ -219,12 +226,11 @@ def generate_markdown_output(
         # Track section changes for visual separation
         if chunk.section_path != current_section:
             if current_section:  # Not first section
-                # We add an empty part which will become a blank line when joined
                 output_parts.append("")
             current_section = chunk.section_path
         
-        # Ensure chunk content is stripped of excessive newlines before adding
-        content = chunk.content.strip()
+        # Use to_markdown() to include chunk-level frontmatter
+        content = chunk.to_markdown().strip()
         if content:
             output_parts.append(content)
     

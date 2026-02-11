@@ -62,11 +62,27 @@ class StructureAwareSegmenter:
         chunks: list[Chunk] = []
         chunk_index = 0
         
+        # Get flat sections from TOC for better page matching if available
+        toc_sections = {}
+        if self.toc_processor:
+            for s in self.toc_processor.get_flat_sections():
+                toc_sections[s["title"].lower()] = s
+        
         for i, section in enumerate(sections):
             # Get neighboring section info
             preceding = sections[i - 1]["title"] if i > 0 else None
             following = sections[i + 1]["title"] if i + 1 < len(sections) else None
             
+            # Enrich section with page info from TOC if available
+            title_lower = section["title"].lower()
+            if title_lower in toc_sections:
+                ts = toc_sections[title_lower]
+                section["page_start"] = ts.get("page_start", 0)
+                section["page_end"] = ts.get("page_end") or section["page_start"]
+            else:
+                section["page_start"] = 0
+                section["page_end"] = 0
+
             # Process section content
             section_chunks = self._process_section(
                 section["content"],
@@ -74,7 +90,9 @@ class StructureAwareSegmenter:
                 section["level"],
                 section.get("path", []),
                 preceding,
-                following
+                following,
+                section["page_start"],
+                section["page_end"]
             )
             
             for chunk in section_chunks:
@@ -106,7 +124,9 @@ class StructureAwareSegmenter:
                 "title": "Document",
                 "level": 0,
                 "content": markdown,
-                "path": []
+                "path": [],
+                "page_start": 0,
+                "page_end": 0
             }]
         
         # Build section path tracking
@@ -144,7 +164,9 @@ class StructureAwareSegmenter:
         level: int,
         path: list[str],
         preceding: Optional[str],
-        following: Optional[str]
+        following: Optional[str],
+        page_start: int = 0,
+        page_end: int = 0
     ) -> list[Chunk]:
         """Process a section into one or more chunks.
         
@@ -155,6 +177,8 @@ class StructureAwareSegmenter:
             path: Section hierarchy path.
             preceding: Title of preceding section.
             following: Title of following section.
+            page_start: Starting page number.
+            page_end: Ending page number.
             
         Returns:
             List of Chunk objects.
@@ -166,13 +190,25 @@ class StructureAwareSegmenter:
         # Determine primary content type
         content_type = self._detect_content_type(content)
         
+        # Determine parent section
+        parent_section = path[-1] if path else None
+        
+        # Determine page range string
+        if page_start == page_end or page_end == 0:
+            page_range = str(page_start)
+        else:
+            page_range = f"{page_start}-{page_end}"
+
         # If content is small enough, return as single chunk
         if len(content) <= self.config.max_chunk_size:
             return [Chunk(
                 content=content,
                 section_path=path + [title],
                 section_level=level,
-                page_number=0,  # Would need page info from converter
+                page_start=page_start,
+                page_end=page_end,
+                page_range=page_range,
+                parent_section=parent_section,
                 content_type=content_type,
                 preceding_section=preceding,
                 following_section=following,
@@ -183,7 +219,7 @@ class StructureAwareSegmenter:
         # Content too large, need to sub-split
         return self._split_large_section(
             content, title, level, path, preceding, following,
-            has_tables, has_code
+            has_tables, has_code, page_start, page_end
         )
     
     def _split_large_section(
@@ -195,7 +231,9 @@ class StructureAwareSegmenter:
         preceding: Optional[str],
         following: Optional[str],
         has_tables: bool,
-        has_code: bool
+        has_code: bool,
+        page_start: int = 0,
+        page_end: int = 0
     ) -> list[Chunk]:
         """Split an oversized section into multiple chunks.
         
@@ -204,6 +242,13 @@ class StructureAwareSegmenter:
         """
         chunks = []
         
+        # Determine parent section and page range
+        parent_section = path[-1] if path else None
+        if page_start == page_end or page_end == 0:
+            page_range = str(page_start)
+        else:
+            page_range = f"{page_start}-{page_end}"
+
         # Extract and protect atomic elements
         protected_elements = []
         working_content = content
@@ -246,7 +291,8 @@ class StructureAwareSegmenter:
                     chunk_content = self._restore_protected(chunk_content, protected_elements)
                     chunks.append(self._create_chunk(
                         chunk_content, title, level, path,
-                        preceding, following, has_tables, has_code
+                        preceding, following, has_tables, has_code,
+                        page_start, page_end
                     ))
                     current_chunk = []
                     current_size = 0
@@ -261,7 +307,10 @@ class StructureAwareSegmenter:
                     content=protected_content,
                     section_path=path + [title],
                     section_level=level,
-                    page_number=0,
+                    page_start=page_start,
+                    page_end=page_end,
+                    page_range=page_range,
+                    parent_section=parent_section,
                     content_type=protected_type,
                     preceding_section=preceding,
                     following_section=following,
@@ -277,7 +326,8 @@ class StructureAwareSegmenter:
                 chunk_content = self._restore_protected(chunk_content, protected_elements)
                 chunks.append(self._create_chunk(
                     chunk_content, title, level, path,
-                    preceding, following, has_tables, has_code
+                    preceding, following, has_tables, has_code,
+                    page_start, page_end
                 ))
                 current_chunk = []
                 current_size = 0
@@ -291,7 +341,8 @@ class StructureAwareSegmenter:
             chunk_content = self._restore_protected(chunk_content, protected_elements)
             chunks.append(self._create_chunk(
                 chunk_content, title, level, path,
-                preceding, following, has_tables, has_code
+                preceding, following, has_tables, has_code,
+                page_start, page_end
             ))
         
         return chunks
@@ -315,14 +366,25 @@ class StructureAwareSegmenter:
         preceding: Optional[str],
         following: Optional[str],
         has_tables: bool,
-        has_code: bool
+        has_code: bool,
+        page_start: int = 0,
+        page_end: int = 0
     ) -> Chunk:
         """Create a Chunk object with proper metadata."""
+        parent_section = path[-1] if path else None
+        if page_start == page_end or page_end == 0:
+            page_range = str(page_start)
+        else:
+            page_range = f"{page_start}-{page_end}"
+
         return Chunk(
             content=content,
             section_path=path + [title],
             section_level=level,
-            page_number=0,
+            page_start=page_start,
+            page_end=page_end,
+            page_range=page_range,
+            parent_section=parent_section,
             content_type=self._detect_content_type(content),
             preceding_section=preceding,
             following_section=following,

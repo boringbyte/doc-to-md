@@ -112,6 +112,7 @@ class PyMuPDFConverter(PDFConverterBase):
                 title=meta.get("title") or None,
                 author=meta.get("author") or None,
                 subject=meta.get("subject") or None,
+                keywords=meta.get("keywords") or None,
                 creation_date=meta.get("creationDate") or None,
                 modification_date=meta.get("modDate") or None,
                 page_count=doc.page_count,
