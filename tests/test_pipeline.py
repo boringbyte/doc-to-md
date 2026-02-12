@@ -55,7 +55,36 @@ def test_run_method(mock_convert, tmp_path):
     
     # Verify file was written
     assert output_file.exists()
-    assert output_file.read_text(encoding='utf-8') == "Processed content"
+    # By default, should have NO frontmatter
+    content = output_file.read_text(encoding='utf-8')
+    assert "---" not in content
+    assert "Processed content" in content
+
+@patch("doc_to_md.pipeline.DocToMd.convert")
+def test_run_multiple_formats(mock_convert, tmp_path):
+    # Setup mock result with real object
+    mock_result = ConversionResult(
+        markdown="Processed content",
+        chunks=[],
+        metadata=DocumentMetadata()
+    )
+    mock_convert.return_value = mock_result
+    
+    input_file = tmp_path / "input.pdf"
+    
+    pipe = DocToMd()
+    # Test as list
+    results = pipe.run(input_file, output_format=["markdown", "json"])
+    
+    assert isinstance(results, list)
+    assert len(results) == 2
+    assert (tmp_path / "input.md").exists()
+    assert (tmp_path / "input.json").exists()
+    
+    # Test as comma-separated string
+    results_str = pipe.run(input_file, output_format="markdown,json")
+    assert isinstance(results_str, list)
+    assert len(results_str) == 2
 
 
 def test_metadata_keywords_handling():
@@ -82,10 +111,20 @@ def test_metadata_keywords_handling():
         parent_section=None,
         content_type=ContentType.PROSE
     )
-    output = generate_markdown_output([chunk], document_metadata=meta)
+    # Test default: No chunk-level metadata AND no doc-level frontmatter
+    output = generate_markdown_output([chunk], document_metadata=meta, include_frontmatter=False)
     
-    assert 'keywords: "rag, pdf, markdown"' in output
-    # Ensure it's not character-split like "r, a, g, ..."
-    assert 'keywords: "r, a, g, ' not in output
-    assert 'page_start: 1' in output
-    assert 'page_range: "1"' in output
+    assert 'keywords: "rag, pdf, markdown"' not in output
+    assert 'page_start: 1' not in output
+    assert '---' not in output
+    
+    # Test explicitly enabled
+    output_enriched = generate_markdown_output(
+        [chunk], 
+        document_metadata=meta, 
+        include_frontmatter=True,
+        include_chunk_metadata=True
+    )
+    assert 'keywords: "rag, pdf, markdown"' in output_enriched
+    assert 'page_start: 1' in output_enriched
+    assert output_enriched.startswith("---")

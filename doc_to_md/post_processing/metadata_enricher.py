@@ -185,7 +185,8 @@ class MetadataEnricher:
 def generate_markdown_output(
     chunks: list[Chunk],
     document_metadata: Optional[DocumentMetadata] = None,
-    include_frontmatter: bool = True
+    include_frontmatter: bool = True,
+    include_chunk_metadata: bool = False
 ) -> str:
     """Generate final markdown output from chunks.
     
@@ -193,6 +194,7 @@ def generate_markdown_output(
         chunks: List of processed chunks.
         document_metadata: Optional document metadata.
         include_frontmatter: Whether to include YAML frontmatter.
+        include_chunk_metadata: Whether to include chunk-level metadata.
         
     Returns:
         Complete markdown string.
@@ -229,8 +231,12 @@ def generate_markdown_output(
                 output_parts.append("")
             current_section = chunk.section_path
         
-        # Use to_markdown() to include chunk-level frontmatter
-        content = chunk.to_markdown().strip()
+        # Use to_markdown() to include chunk-level frontmatter if requested
+        if include_chunk_metadata:
+            content = chunk.to_markdown().strip()
+        else:
+            content = chunk.content.strip()
+            
         if content:
             output_parts.append(content)
     

@@ -50,8 +50,9 @@ class PipelineConfig:
     whitespace_config: WhitespaceConfig = field(default_factory=WhitespaceConfig)
     
     # Output settings
-    include_frontmatter: bool = True
-    output_format: str = "markdown"  # "markdown" or "json"
+    include_frontmatter: bool = False
+    include_chunk_metadata: bool = False  # Toggle chunk-level metadata in markdown
+    output_format: Union[str, list[str]] = "markdown"  # "markdown", "json", or list e.g. ["markdown", "json"]
     
     # Processing flags
     extract_toc: bool = True
@@ -205,6 +206,27 @@ class DocToMd:
         input_path = Path(input_path)
         output_format = output_format or self.config.output_format
         
+        # Handle multiple formats
+        if isinstance(output_format, str) and ',' in output_format:
+            output_format = [f.strip() for f in output_format.split(',')]
+            
+        if isinstance(output_format, list):
+            results = []
+            # Run conversion once
+            result = self.convert(input_path)
+            for fmt in output_format:
+                # If output_path is provided, use it as base or specific file
+                current_output = output_path
+                if not current_output:
+                    suffix = '.json' if fmt == 'json' else '.md'
+                    current_output = input_path.with_suffix(suffix)
+                elif Path(current_output).is_dir():
+                    suffix = '.json' if fmt == 'json' else '.md'
+                    current_output = Path(current_output) / input_path.with_suffix(suffix).name
+                
+                results.append(self.convert_to_file(input_path, current_output, fmt, conversion_result=result))
+            return results[0] if len(results) == 1 else results
+            
         if output_path:
             output_path = Path(output_path)
         else:
@@ -217,10 +239,11 @@ class DocToMd:
         self,
         pdf_path: Union[str, Path],
         output_path: Union[str, Path],
-        output_format: Optional[str] = None
+        output_format: Optional[str] = None,
+        conversion_result: Optional[ConversionResult] = None
     ) -> Path:
         """Internal helper to convert and write to specific file."""
-        result = self.convert(pdf_path)
+        result = conversion_result or self.convert(pdf_path)
         output_path = Path(output_path)
         output_format = output_format or self.config.output_format
         
@@ -231,7 +254,8 @@ class DocToMd:
             markdown = generate_markdown_output(
                 result.chunks if result.chunks else [],
                 result.metadata,
-                include_frontmatter=self.config.include_frontmatter
+                include_frontmatter=self.config.include_frontmatter,
+                include_chunk_metadata=self.config.include_chunk_metadata
             )
             # If no chunks, use raw markdown
             if not result.chunks:

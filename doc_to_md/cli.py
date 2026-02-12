@@ -45,8 +45,12 @@ def cmd_convert(args: argparse.Namespace) -> int:
     )
     
     try:
-        result_path = pipeline.run(pdf_path, output_path)
-        logger.info(f"[OK] Converted: {pdf_path.name} -> {result_path.name}")
+        result = pipeline.run(pdf_path, output_path)
+        if isinstance(result, list):
+            paths = ", ".join([p.name for p in result])
+            logger.info(f"[OK] Converted: {pdf_path.name} -> [{paths}]")
+        else:
+            logger.info(f"[OK] Converted: {pdf_path.name} -> {result.name}")
         return 0
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -83,8 +87,12 @@ def cmd_batch(args: argparse.Namespace) -> int:
     success_count = 0
     for pdf_file in pdf_files:
         try:
-            result_path = pipeline.run(pdf_file, output_dir / pdf_file.stem)
-            logger.info(f"[OK] {pdf_file.name}")
+            result = pipeline.run(pdf_file, output_dir / pdf_file.stem)
+            if isinstance(result, list):
+                paths = ", ".join([p.name for p in result])
+                logger.info(f"[OK] {pdf_file.name} -> [{paths}]")
+            else:
+                logger.info(f"[OK] {pdf_file.name} -> {result.name}")
             success_count += 1
         except Exception as e:
             logger.error(f"[FAIL] {pdf_file.name}: {e}")
@@ -161,9 +169,8 @@ def main() -> int:
     )
     convert_parser.add_argument(
         '-f', '--format',
-        choices=['markdown', 'json'],
         default='markdown',
-        help='Output format (default: markdown)'
+        help='Output format(s), e.g., "markdown", "json", or "markdown,json" (default: markdown)'
     )
     convert_parser.add_argument(
         '--chunk-size',
@@ -199,9 +206,8 @@ def main() -> int:
     )
     batch_parser.add_argument(
         '-f', '--format',
-        choices=['markdown', 'json'],
         default='markdown',
-        help='Output format (default: markdown)'
+        help='Output format(s), e.g., "markdown", "json", or "markdown,json" (default: markdown)'
     )
     batch_parser.add_argument(
         '--no-frontmatter',
