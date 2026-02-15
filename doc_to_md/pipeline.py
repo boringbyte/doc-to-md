@@ -379,7 +379,8 @@ class DocToMd:
         input_dir: Union[str, Path],
         output_dir: Optional[Union[str, Path]] = None,
         pattern: str = "*.pdf",
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        output_format: Optional[str] = None
     ) -> list[Path]:
         """Convert all PDFs in a directory.
         
@@ -388,6 +389,7 @@ class DocToMd:
             output_dir: Output directory (default: input_dir/converted).
             pattern: Glob pattern (default: "*.pdf").
             limit: Max number of files to process (default: None = all).
+            output_format: Override output format (e.g. "markdown", "json", "markdown,json").
             
         Returns:
             List of output file paths.
@@ -410,13 +412,14 @@ class DocToMd:
         for i, pdf_file in enumerate(pdf_files, 1):
             try:
                 logger.info(f"[{i}/{len(pdf_files)}] Converting {pdf_file.name}")
-                result_path = self.run(pdf_file, output_dir)
+                result_path = self.run(pdf_file, output_dir, output_format=output_format)
                 output_paths.append(result_path)
             except Exception as e:
                 logger.error(f"[{i}/{len(pdf_files)}] Failed {pdf_file.name}: {e}")
         
         logger.info(f"Done: {len(output_paths)}/{len(pdf_files)} files converted")
         return output_paths
+
 
 
 # Alias for backward compatibility

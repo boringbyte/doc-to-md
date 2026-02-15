@@ -128,3 +128,75 @@ def test_metadata_keywords_handling():
     assert 'keywords: "rag, pdf, markdown"' in output_enriched
     assert 'page_start: 1' in output_enriched
     assert output_enriched.startswith("---")
+
+
+@patch("doc_to_md.pipeline.DocToMd.convert")
+def test_run_with_directory_output(mock_convert, tmp_path):
+    """Test that run() correctly handles a directory as output_path."""
+    mock_result = ConversionResult(
+        markdown="Processed content",
+        chunks=[],
+        metadata=DocumentMetadata()
+    )
+    mock_convert.return_value = mock_result
+    
+    input_file = tmp_path / "my_document.pdf"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    
+    pipe = DocToMd()
+    result = pipe.run(input_file, output_dir)
+    
+    # Should create file named after input inside the output directory
+    assert result == output_dir / "my_document.md"
+    assert result.exists()
+    assert "Processed content" in result.read_text(encoding='utf-8')
+
+
+@patch("doc_to_md.pipeline.DocToMd.convert")
+def test_convert_directory_with_limit(mock_convert, tmp_path):
+    """Test convert_directory respects the limit parameter."""
+    mock_result = ConversionResult(
+        markdown="Content",
+        chunks=[],
+        metadata=DocumentMetadata()
+    )
+    mock_convert.return_value = mock_result
+    
+    # Create 5 dummy PDF files
+    for i in range(5):
+        (tmp_path / f"doc{i}.pdf").write_bytes(b"dummy")
+    
+    output_dir = tmp_path / "output"
+    pipe = DocToMd()
+    
+    # Process only 2
+    results = pipe.convert_directory(tmp_path, output_dir=output_dir, limit=2)
+    assert len(results) == 2
+    
+    # Process all
+    results_all = pipe.convert_directory(tmp_path, output_dir=output_dir)
+    assert len(results_all) == 5
+
+
+@patch("doc_to_md.pipeline.DocToMd.convert")
+def test_convert_directory_with_output_format(mock_convert, tmp_path):
+    """Test convert_directory with output_format override."""
+    mock_result = ConversionResult(
+        markdown="Content",
+        chunks=[],
+        metadata=DocumentMetadata()
+    )
+    mock_convert.return_value = mock_result
+    
+    (tmp_path / "test.pdf").write_bytes(b"dummy")
+    output_dir = tmp_path / "output"
+    
+    pipe = DocToMd()
+    results = pipe.convert_directory(
+        tmp_path, output_dir=output_dir, output_format="json", limit=1
+    )
+    
+    assert len(results) == 1
+    assert results[0].suffix == ".json"
+    assert results[0].exists()
