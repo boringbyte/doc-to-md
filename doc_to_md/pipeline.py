@@ -2,6 +2,7 @@
 
 import json
 import logging
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
@@ -58,6 +59,7 @@ class PipelineConfig:
     extract_toc: bool = True
     segment_content: bool = True
     enrich_metadata: bool = True
+    process_embedded: bool = True  # Process embedded PDF attachments
     
     # Post-processing flags
     run_cleanup: bool = True
@@ -185,7 +187,58 @@ class DocToMd:
             result.chunks = enricher.enrich_chunks(result.chunks)
         
         logger.info("Conversion complete")
+        
+        # Stage 10: Process embedded PDFs
+        if self.config.process_embedded and hasattr(self.converter, 'has_embedded_pdfs'):
+            if self.converter.has_embedded_pdfs(path):
+                embedded_pdfs = self.converter.get_embedded_pdfs(path)
+                logger.info(f"Found {len(embedded_pdfs)} embedded PDFs")
+                for emb_pdf in embedded_pdfs:
+                    try:
+                        emb_result = self._convert_embedded_pdf(emb_pdf)
+                        result.embedded_results.append(emb_result)
+                        logger.info(f"  Converted embedded: {emb_pdf.filename}")
+                    except Exception as e:
+                        logger.error(f"  Failed to convert embedded '{emb_pdf.filename}': {e}")
+        
         return result
+    
+    def _convert_embedded_pdf(self, embedded_pdf) -> ConversionResult:
+        """Convert an embedded PDF by writing it to a temp file and running the pipeline."""
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+            tmp.write(embedded_pdf.data)
+            tmp_path = Path(tmp.name)
+        
+        try:
+            # Create a sub-pipeline without embedded processing to avoid recursion
+            sub_pipeline = DocToMd(config=PipelineConfig(
+                converter=self.config.converter,
+                segmenter_config=self.config.segmenter_config,
+                metadata_config=self.config.metadata_config,
+                cleanup_config=self.config.cleanup_config,
+                heading_fixer_config=self.config.heading_fixer_config,
+                link_fixer_config=self.config.link_fixer_config,
+                code_block_config=self.config.code_block_config,
+                whitespace_config=self.config.whitespace_config,
+                include_frontmatter=self.config.include_frontmatter,
+                include_chunk_metadata=self.config.include_chunk_metadata,
+                output_format=self.config.output_format,
+                extract_toc=self.config.extract_toc,
+                segment_content=self.config.segment_content,
+                enrich_metadata=self.config.enrich_metadata,
+                process_embedded=False,  # Don't recurse
+                run_cleanup=self.config.run_cleanup,
+                fix_headings=self.config.fix_headings,
+                fix_links=self.config.fix_links,
+                fix_code_blocks=self.config.fix_code_blocks,
+                run_whitespace_norm=self.config.run_whitespace_norm,
+            ))
+            result = sub_pipeline.convert(tmp_path)
+            # Override source_file metadata with the embedded filename
+            result.metadata.source_file = embedded_pdf.filename
+            return result
+        finally:
+            tmp_path.unlink(missing_ok=True)
     
     def run(
         self,
@@ -264,7 +317,53 @@ class DocToMd:
                 f.write(markdown)
         
         logger.info(f"Output saved to {output_path}")
+        
+        # Save embedded PDF results to a subdirectory
+        if result.embedded_results:
+            self._save_embedded_results(
+                result.embedded_results,
+                output_path,
+                output_format
+            )
+        
         return output_path
+    
+    def _save_embedded_results(
+        self,
+        embedded_results: list[ConversionResult],
+        parent_output_path: Path,
+        output_format: str
+    ) -> list[Path]:
+        """Save embedded PDF conversion results to a subdirectory."""
+        # Create subdirectory named after parent file
+        sub_dir = parent_output_path.parent / parent_output_path.stem
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        
+        saved_paths = []
+        for emb_result in embedded_results:
+            emb_name = emb_result.metadata.source_file or "embedded"
+            suffix = '.json' if output_format == 'json' else '.md'
+            emb_output_path = sub_dir / f"{emb_name}{suffix}"
+            
+            if output_format == "json":
+                with open(emb_output_path, 'w', encoding='utf-8') as f:
+                    json.dump(emb_result.to_dict(), f, indent=2, ensure_ascii=False)
+            else:
+                markdown = generate_markdown_output(
+                    emb_result.chunks if emb_result.chunks else [],
+                    emb_result.metadata,
+                    include_frontmatter=self.config.include_frontmatter,
+                    include_chunk_metadata=self.config.include_chunk_metadata
+                )
+                if not emb_result.chunks:
+                    markdown = emb_result.markdown
+                with open(emb_output_path, 'w', encoding='utf-8') as f:
+                    f.write(markdown)
+            
+            logger.info(f"  Embedded output saved to {emb_output_path}")
+            saved_paths.append(emb_output_path)
+        
+        return saved_paths
     
     def convert_directory(
         self,

@@ -166,6 +166,20 @@ class Chunk:
 
 
 @dataclass
+class EmbeddedPDF:
+    """Represents an embedded/attached PDF within a parent PDF."""
+    name: str  # Internal name in the PDF portfolio
+    filename: str  # Clean filename for output
+    data: bytes = field(repr=False)  # Raw PDF bytes
+    
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "filename": self.filename,
+        }
+
+
+@dataclass
 class ConversionResult:
     """Result of PDF to Markdown conversion."""
     markdown: str
@@ -174,9 +188,10 @@ class ConversionResult:
     metadata: DocumentMetadata = field(default_factory=DocumentMetadata)
     sections: list[Section] = field(default_factory=list)
     chunks: list[Chunk] = field(default_factory=list)
+    embedded_results: list["ConversionResult"] = field(default_factory=list)
     
     def to_dict(self) -> dict:
-        return {
+        result = {
             "markdown": self.markdown,
             "toc": [t.to_dict() for t in self.toc],
             "tables": [t.to_dict() for t in self.tables],
@@ -184,3 +199,8 @@ class ConversionResult:
             "sections": [s.to_dict() for s in self.sections],
             "chunks": [c.to_dict() for c in self.chunks]
         }
+        if self.embedded_results:
+            result["embedded_documents"] = [
+                er.to_dict() for er in self.embedded_results
+            ]
+        return result

@@ -42,6 +42,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
         max_chunk_size=args.max_chunk_size,
         output_format=args.format,
         include_frontmatter=not args.no_frontmatter,
+        process_embedded=not args.no_embedded,
     )
     
     try:
@@ -75,6 +76,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
     pipeline = DocToMd(
         output_format=args.format,
         include_frontmatter=not args.no_frontmatter,
+        process_embedded=not args.no_embedded,
     )
     
     pdf_files = list(input_dir.glob("*.pdf"))
@@ -189,6 +191,11 @@ def main() -> int:
         action='store_true',
         help='Disable YAML frontmatter in output'
     )
+    convert_parser.add_argument(
+        '--no-embedded',
+        action='store_true',
+        help='Skip processing embedded PDF attachments'
+    )
     convert_parser.set_defaults(func=cmd_convert)
     
     # Batch command
@@ -213,6 +220,11 @@ def main() -> int:
         '--no-frontmatter',
         action='store_true',
         help='Disable YAML frontmatter in output'
+    )
+    batch_parser.add_argument(
+        '--no-embedded',
+        action='store_true',
+        help='Skip processing embedded PDF attachments'
     )
     batch_parser.set_defaults(func=cmd_batch)
     

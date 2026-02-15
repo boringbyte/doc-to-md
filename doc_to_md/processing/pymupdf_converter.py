@@ -12,6 +12,7 @@ from .converter_interface import PDFConverterBase
 from .models import (
     ConversionResult,
     DocumentMetadata,
+    EmbeddedPDF,
     TableData,
     TOCItem,
 )
@@ -158,3 +159,75 @@ class PyMuPDFConverter(PDFConverterBase):
                 ))
         
         return tables
+
+    def has_embedded_pdfs(self, pdf_path: Union[str, Path]) -> bool:
+        """Check if a PDF contains embedded PDF attachments.
+        
+        Args:
+            pdf_path: Path to the PDF file.
+            
+        Returns:
+            True if the PDF contains embedded PDF files.
+        """
+        path = Path(pdf_path)
+        doc = pymupdf.open(str(path))
+        try:
+            if doc.embfile_count() == 0:
+                return False
+            # Check if any embedded file names indicate PDFs
+            for name in doc.embfile_names():
+                if name.lower().endswith(".pdf"):
+                    return True
+            return False
+        finally:
+            doc.close()
+
+    def get_embedded_pdfs(self, pdf_path: Union[str, Path]) -> list[EmbeddedPDF]:
+        """Extract embedded PDF attachments from a PDF.
+        
+        Args:
+            pdf_path: Path to the PDF file.
+            
+        Returns:
+            List of EmbeddedPDF objects with name, filename, and raw bytes.
+        """
+        path = Path(pdf_path)
+        doc = pymupdf.open(str(path))
+        embedded = []
+        try:
+            for name in doc.embfile_names():
+                if not name.lower().endswith(".pdf"):
+                    continue
+                try:
+                    data = doc.embfile_get(name)
+                except Exception as e:
+                    logger.warning(f"Could not extract embedded file '{name}': {e}")
+                    continue
+                clean_name = self._clean_embedded_filename(name)
+                embedded.append(EmbeddedPDF(
+                    name=name,
+                    filename=clean_name,
+                    data=data
+                ))
+            return embedded
+        finally:
+            doc.close()
+
+
+    @staticmethod
+    def _clean_embedded_filename(filename: str) -> str:
+        """Clean an embedded file name for use as an output filename.
+        
+        Removes portfolio prefix tags like '<0>', '<1>' and sanitizes.
+        """
+        # Remove leading tags like '<0>', '<1>', '<2>'
+        cleaned = re.sub(r'^<\d+>', '', filename).strip()
+        # Remove .pdf extension (we'll add proper extension later)
+        if cleaned.lower().endswith('.pdf'):
+            cleaned = cleaned[:-4]
+        # Sanitize for filesystem: replace special chars with hyphens
+        cleaned = re.sub(r'[^\w\s.-]', '', cleaned)
+        cleaned = re.sub(r'\s+', '-', cleaned)
+        # Lowercase and trim
+        cleaned = cleaned.lower().strip('-')
+        return cleaned
