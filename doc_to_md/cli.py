@@ -64,13 +64,11 @@ def cmd_convert(args: argparse.Namespace) -> int:
 def cmd_batch(args: argparse.Namespace) -> int:
     """Handle the batch command for directory processing."""
     input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir) if args.output_dir else input_dir / "converted"
+    output_dir = Path(args.output_dir) if args.output_dir else None
     
     if not input_dir.exists():
         logger.error(f"Error: Directory not found: {input_dir}")
         return 1
-    
-    output_dir.mkdir(parents=True, exist_ok=True)
     
     # Configure pipeline using simplified API
     pipeline = DocToMd(
@@ -79,28 +77,16 @@ def cmd_batch(args: argparse.Namespace) -> int:
         process_embedded=not args.no_embedded,
     )
     
-    pdf_files = list(input_dir.glob("*.pdf"))
-    if not pdf_files:
-        logger.error(f"No PDF files found in {input_dir}")
-        return 0
+    limit = getattr(args, 'limit', None)
+    output_paths = pipeline.convert_directory(
+        input_dir,
+        output_dir=output_dir,
+        limit=limit
+    )
     
-    logger.info(f"Found {len(pdf_files)} PDF files")
-    
-    success_count = 0
-    for pdf_file in pdf_files:
-        try:
-            result = pipeline.run(pdf_file, output_dir / pdf_file.stem)
-            if isinstance(result, list):
-                paths = ", ".join([p.name for p in result])
-                logger.info(f"[OK] {pdf_file.name} -> [{paths}]")
-            else:
-                logger.info(f"[OK] {pdf_file.name} -> {result.name}")
-            success_count += 1
-        except Exception as e:
-            logger.error(f"[FAIL] {pdf_file.name}: {e}")
-    
-    logger.info(f"\nConverted {success_count}/{len(pdf_files)} files")
-    return 0 if success_count == len(pdf_files) else 1
+    if not output_paths:
+        return 1
+    return 0
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -225,6 +211,12 @@ def main() -> int:
         '--no-embedded',
         action='store_true',
         help='Skip processing embedded PDF attachments'
+    )
+    batch_parser.add_argument(
+        '--limit', '-n',
+        type=int,
+        default=None,
+        help='Max number of PDF files to process (default: all)'
     )
     batch_parser.set_defaults(func=cmd_batch)
     

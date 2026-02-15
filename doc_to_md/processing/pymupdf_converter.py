@@ -1,5 +1,6 @@
 """PDF converter implementation using pymupdf4llm."""
 
+import logging
 import re
 from pathlib import Path
 from typing import Union
@@ -17,6 +18,7 @@ from .models import (
     TOCItem,
 )
 
+logger = logging.getLogger(__name__)
 
 class PyMuPDFConverter(PDFConverterBase):
     """PDF to Markdown converter using pymupdf4llm.

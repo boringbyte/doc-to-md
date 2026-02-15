@@ -250,11 +250,14 @@ class DocToMd:
         
         Args:
             input_path: Path to input PDF.
-            output_path: Optional output path.
-            output_format: Optional format override (markdown/json).
+            output_path: Optional output path. Can be:
+                - A file path (e.g., "output/result.md")
+                - A directory path (e.g., "output/") — file is named after input
+                - None — output is created next to the input file
+            output_format: Optional format override ("markdown", "json", or "markdown,json").
             
         Returns:
-            Path to the created file.
+            Path to the created file, or list of Paths if multiple formats.
         """
         input_path = Path(input_path)
         output_format = output_format or self.config.output_format
@@ -268,25 +271,31 @@ class DocToMd:
             # Run conversion once
             result = self.convert(input_path)
             for fmt in output_format:
-                # If output_path is provided, use it as base or specific file
-                current_output = output_path
-                if not current_output:
-                    suffix = '.json' if fmt == 'json' else '.md'
-                    current_output = input_path.with_suffix(suffix)
-                elif Path(current_output).is_dir():
-                    suffix = '.json' if fmt == 'json' else '.md'
-                    current_output = Path(current_output) / input_path.with_suffix(suffix).name
-                
+                current_output = self._resolve_output_path(input_path, output_path, fmt)
                 results.append(self.convert_to_file(input_path, current_output, fmt, conversion_result=result))
             return results[0] if len(results) == 1 else results
-            
-        if output_path:
-            output_path = Path(output_path)
-        else:
-            suffix = '.json' if output_format == 'json' else '.md'
-            output_path = input_path.with_suffix(suffix)
-            
-        return self.convert_to_file(input_path, output_path, output_format)
+        
+        resolved_output = self._resolve_output_path(input_path, output_path, output_format)
+        return self.convert_to_file(input_path, resolved_output, output_format)
+    
+    @staticmethod
+    def _resolve_output_path(
+        input_path: Path,
+        output_path: Optional[Union[str, Path]],
+        output_format: str
+    ) -> Path:
+        """Resolve the output file path from input path, output path, and format."""
+        suffix = '.json' if output_format == 'json' else '.md'
+        
+        if not output_path:
+            return input_path.with_suffix(suffix)
+        
+        output_path = Path(output_path)
+        if output_path.is_dir():
+            output_path.mkdir(parents=True, exist_ok=True)
+            return output_path / f"{input_path.stem}{suffix}"
+        
+        return output_path
 
     def convert_to_file(
         self,
@@ -368,24 +377,45 @@ class DocToMd:
     def convert_directory(
         self,
         input_dir: Union[str, Path],
-        output_dir: Union[str, Path],
-        pattern: str = "*.pdf"
+        output_dir: Optional[Union[str, Path]] = None,
+        pattern: str = "*.pdf",
+        limit: Optional[int] = None
     ) -> list[Path]:
-        """Convert all PDFs in a directory."""
+        """Convert all PDFs in a directory.
+        
+        Args:
+            input_dir: Directory containing PDF files.
+            output_dir: Output directory (default: input_dir/converted).
+            pattern: Glob pattern (default: "*.pdf").
+            limit: Max number of files to process (default: None = all).
+            
+        Returns:
+            List of output file paths.
+        """
         input_dir = Path(input_dir)
+        if output_dir is None:
+            output_dir = input_dir / "converted"
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         
+        pdf_files = sorted(input_dir.glob(pattern))
+        total = len(pdf_files)
+        
+        if limit and limit > 0:
+            pdf_files = pdf_files[:limit]
+        
+        logger.info(f"Processing {len(pdf_files)}/{total} PDF files from {input_dir}")
+        
         output_paths = []
-        for pdf_file in input_dir.glob(pattern):
-            output_name = pdf_file.stem
-            output_path = output_dir / output_name
+        for i, pdf_file in enumerate(pdf_files, 1):
             try:
-                result_path = self.run(pdf_file, output_path)
+                logger.info(f"[{i}/{len(pdf_files)}] Converting {pdf_file.name}")
+                result_path = self.run(pdf_file, output_dir)
                 output_paths.append(result_path)
             except Exception as e:
-                logger.error(f"Failed to convert {pdf_file}: {e}")
+                logger.error(f"[{i}/{len(pdf_files)}] Failed {pdf_file.name}: {e}")
         
+        logger.info(f"Done: {len(output_paths)}/{len(pdf_files)} files converted")
         return output_paths
 
 
