@@ -34,6 +34,9 @@ class PyMuPDFConverter(PDFConverterBase):
     def convert(self, pdf_path: Union[str, Path]) -> ConversionResult:
         """Convert PDF to markdown with full metadata extraction.
         
+        Opens the PDF once and extracts markdown, TOC, and metadata
+        in a single session for optimal performance.
+        
         Args:
             pdf_path: Path to the PDF file.
             
@@ -42,23 +45,24 @@ class PyMuPDFConverter(PDFConverterBase):
         """
         path = Path(pdf_path)
         
-        # Extract markdown with page chunks for metadata
+        # Extract markdown via pymupdf4llm (opens/closes internally)
         md_text = pymupdf4llm.to_markdown(
             str(path),
-            page_chunks=False,  # Get full document first
-            write_images=False,  # Don't extract images for now
+            page_chunks=False,
+            write_images=False,
             header=False,
             footer=False,
         )
         
-        # Extract TOC
-        toc = self.get_toc(path)
+        # Single open for TOC + metadata (instead of 2 separate opens)
+        doc = pymupdf.open(str(path))
+        try:
+            toc = self._extract_toc_from_doc(doc)
+            metadata = self._extract_metadata_from_doc(doc, path)
+        finally:
+            doc.close()
         
-        # Extract metadata  
-        metadata = self.get_metadata(path)
-        metadata.source_file = str(path)
-        
-        # Extract tables (we'll identify them from the markdown)
+        # Extract tables from markdown (no file I/O needed)
         tables = self._extract_tables_from_markdown(md_text)
         
         return ConversionResult(
@@ -68,6 +72,34 @@ class PyMuPDFConverter(PDFConverterBase):
             metadata=metadata,
         )
     
+    # --- Internal extraction methods (operate on an already-opened doc) ---
+    
+    @staticmethod
+    def _extract_toc_from_doc(doc: pymupdf.Document) -> list[TOCItem]:
+        """Extract TOC from an already-opened PyMuPDF document."""
+        raw_toc = doc.get_toc()
+        return [
+            TOCItem(level=item[0], title=item[1].strip(), page_number=item[2])
+            for item in raw_toc
+        ]
+    
+    @staticmethod
+    def _extract_metadata_from_doc(doc: pymupdf.Document, path: Path) -> DocumentMetadata:
+        """Extract metadata from an already-opened PyMuPDF document."""
+        meta = doc.metadata or {}
+        return DocumentMetadata(
+            title=meta.get("title") or None,
+            author=meta.get("author") or None,
+            subject=meta.get("subject") or None,
+            keywords=meta.get("keywords") or None,
+            creation_date=meta.get("creationDate") or None,
+            modification_date=meta.get("modDate") or None,
+            page_count=doc.page_count,
+            source_file=str(path)
+        )
+    
+    # --- Public convenience methods (open file themselves, backward compat) ---
+
     def get_toc(self, pdf_path: Union[str, Path]) -> list[TOCItem]:
         """Extract table of contents from PDF.
         
@@ -79,20 +111,8 @@ class PyMuPDFConverter(PDFConverterBase):
         """
         path = Path(pdf_path)
         doc = pymupdf.open(str(path))
-        
         try:
-            raw_toc = doc.get_toc()
-            toc_items = []
-            
-            for item in raw_toc:
-                level, title, page = item[0], item[1], item[2]
-                toc_items.append(TOCItem(
-                    level=level,
-                    title=title.strip(),
-                    page_number=page
-                ))
-            
-            return toc_items
+            return self._extract_toc_from_doc(doc)
         finally:
             doc.close()
     
@@ -107,20 +127,8 @@ class PyMuPDFConverter(PDFConverterBase):
         """
         path = Path(pdf_path)
         doc = pymupdf.open(str(path))
-        
         try:
-            meta = doc.metadata or {}
-            
-            return DocumentMetadata(
-                title=meta.get("title") or None,
-                author=meta.get("author") or None,
-                subject=meta.get("subject") or None,
-                keywords=meta.get("keywords") or None,
-                creation_date=meta.get("creationDate") or None,
-                modification_date=meta.get("modDate") or None,
-                page_count=doc.page_count,
-                source_file=str(path)
-            )
+            return self._extract_metadata_from_doc(doc, path)
         finally:
             doc.close()
     
@@ -137,8 +145,6 @@ class PyMuPDFConverter(PDFConverterBase):
         """
         tables = []
         
-        # Regex pattern to match markdown tables
-        # A table starts with a header row, then a separator row with dashes/pipes
         table_pattern = re.compile(
             r'(\|[^\n]+\|\n\|[-:\| ]+\|\n(?:\|[^\n]+\|\n)*)',
             re.MULTILINE
@@ -148,55 +154,36 @@ class PyMuPDFConverter(PDFConverterBase):
             table_content = match.group(1).strip()
             rows = table_content.split('\n')
             
-            # Count columns from header row
             if rows:
                 col_count = len([c for c in rows[0].split('|') if c.strip()])
                 row_count = len(rows) - 1  # Exclude separator row
                 
                 tables.append(TableData(
                     content=table_content,
-                    page_number=0,  # Would need page tracking for accuracy
+                    page_number=0,
                     row_count=row_count,
                     col_count=col_count
                 ))
         
         return tables
 
-    def has_embedded_pdfs(self, pdf_path: Union[str, Path]) -> bool:
-        """Check if a PDF contains embedded PDF attachments.
+    def extract_embedded_pdfs(self, pdf_path: Union[str, Path]) -> list[EmbeddedPDF]:
+        """Extract embedded PDF attachments from a PDF in a single open.
+        
+        Combines the check + extraction into one file open for performance.
         
         Args:
             pdf_path: Path to the PDF file.
             
         Returns:
-            True if the PDF contains embedded PDF files.
-        """
-        path = Path(pdf_path)
-        doc = pymupdf.open(str(path))
-        try:
-            if doc.embfile_count() == 0:
-                return False
-            # Check if any embedded file names indicate PDFs
-            for name in doc.embfile_names():
-                if name.lower().endswith(".pdf"):
-                    return True
-            return False
-        finally:
-            doc.close()
-
-    def get_embedded_pdfs(self, pdf_path: Union[str, Path]) -> list[EmbeddedPDF]:
-        """Extract embedded PDF attachments from a PDF.
-        
-        Args:
-            pdf_path: Path to the PDF file.
-            
-        Returns:
-            List of EmbeddedPDF objects with name, filename, and raw bytes.
+            List of EmbeddedPDF objects (empty if none found).
         """
         path = Path(pdf_path)
         doc = pymupdf.open(str(path))
         embedded = []
         try:
+            if doc.embfile_count() == 0:
+                return embedded
             for name in doc.embfile_names():
                 if not name.lower().endswith(".pdf"):
                     continue
@@ -214,6 +201,21 @@ class PyMuPDFConverter(PDFConverterBase):
             return embedded
         finally:
             doc.close()
+
+    def has_embedded_pdfs(self, pdf_path: Union[str, Path]) -> bool:
+        """Check if a PDF contains embedded PDF attachments."""
+        path = Path(pdf_path)
+        doc = pymupdf.open(str(path))
+        try:
+            if doc.embfile_count() == 0:
+                return False
+            return any(name.lower().endswith(".pdf") for name in doc.embfile_names())
+        finally:
+            doc.close()
+
+    def get_embedded_pdfs(self, pdf_path: Union[str, Path]) -> list[EmbeddedPDF]:
+        """Extract embedded PDF attachments (backward compat wrapper)."""
+        return self.extract_embedded_pdfs(pdf_path)
 
 
     @staticmethod

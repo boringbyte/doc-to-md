@@ -3,6 +3,7 @@
 import json
 import logging
 import tempfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
@@ -60,6 +61,9 @@ class PipelineConfig:
     segment_content: bool = True
     enrich_metadata: bool = True
     process_embedded: bool = True  # Process embedded PDF attachments
+    
+    # Performance
+    workers: int = 1  # Number of parallel workers for batch processing
     
     # Post-processing flags
     run_cleanup: bool = True
@@ -188,10 +192,10 @@ class DocToMd:
         
         logger.info("Conversion complete")
         
-        # Stage 10: Process embedded PDFs
-        if self.config.process_embedded and hasattr(self.converter, 'has_embedded_pdfs'):
-            if self.converter.has_embedded_pdfs(path):
-                embedded_pdfs = self.converter.get_embedded_pdfs(path)
+        # Stage 10: Process embedded PDFs (single open instead of has+get)
+        if self.config.process_embedded and hasattr(self.converter, 'extract_embedded_pdfs'):
+            embedded_pdfs = self.converter.extract_embedded_pdfs(path)
+            if embedded_pdfs:
                 logger.info(f"Found {len(embedded_pdfs)} embedded PDFs")
                 for emb_pdf in embedded_pdfs:
                     try:
@@ -380,7 +384,8 @@ class DocToMd:
         output_dir: Optional[Union[str, Path]] = None,
         pattern: str = "*.pdf",
         limit: Optional[int] = None,
-        output_format: Optional[str] = None
+        output_format: Optional[str] = None,
+        workers: Optional[int] = None
     ) -> list[Path]:
         """Convert all PDFs in a directory.
         
@@ -390,6 +395,7 @@ class DocToMd:
             pattern: Glob pattern (default: "*.pdf").
             limit: Max number of files to process (default: None = all).
             output_format: Override output format (e.g. "markdown", "json", "markdown,json").
+            workers: Number of parallel workers (default: from config, 1 = sequential).
             
         Returns:
             List of output file paths.
@@ -406,20 +412,100 @@ class DocToMd:
         if limit and limit > 0:
             pdf_files = pdf_files[:limit]
         
-        logger.info(f"Processing {len(pdf_files)}/{total} PDF files from {input_dir}")
+        num_workers = workers or self.config.workers
+        
+        if num_workers > 1 and len(pdf_files) > 1:
+            return self._convert_directory_parallel(
+                pdf_files, output_dir, output_format, num_workers
+            )
+        
+        return self._convert_directory_sequential(
+            pdf_files, output_dir, output_format
+        )
+    
+    def _convert_directory_sequential(
+        self,
+        pdf_files: list[Path],
+        output_dir: Path,
+        output_format: Optional[str] = None
+    ) -> list[Path]:
+        """Convert files sequentially (workers=1)."""
+        count = len(pdf_files)
+        logger.info(f"Processing {count} PDF files sequentially")
         
         output_paths = []
         for i, pdf_file in enumerate(pdf_files, 1):
             try:
-                logger.info(f"[{i}/{len(pdf_files)}] Converting {pdf_file.name}")
+                logger.info(f"[{i}/{count}] Converting {pdf_file.name}")
                 result_path = self.run(pdf_file, output_dir, output_format=output_format)
                 output_paths.append(result_path)
             except Exception as e:
-                logger.error(f"[{i}/{len(pdf_files)}] Failed {pdf_file.name}: {e}")
+                logger.error(f"[{i}/{count}] Failed {pdf_file.name}: {e}")
         
-        logger.info(f"Done: {len(output_paths)}/{len(pdf_files)} files converted")
+        logger.info(f"Done: {len(output_paths)}/{count} files converted")
+        return output_paths
+    
+    def _convert_directory_parallel(
+        self,
+        pdf_files: list[Path],
+        output_dir: Path,
+        output_format: Optional[str],
+        num_workers: int
+    ) -> list[Path]:
+        """Convert files in parallel using ProcessPoolExecutor."""
+        count = len(pdf_files)
+        effective_workers = min(num_workers, count)
+        logger.info(f"Processing {count} PDF files with {effective_workers} workers")
+        
+        # Build config kwargs for the worker (must be picklable)
+        config_kwargs = {
+            'output_format': self.config.output_format,
+            'include_frontmatter': self.config.include_frontmatter,
+            'process_embedded': self.config.process_embedded,
+        }
+        
+        output_paths = []
+        failed = 0
+        
+        with ProcessPoolExecutor(max_workers=effective_workers) as executor:
+            future_to_file = {
+                executor.submit(
+                    _convert_single_file,
+                    pdf_file,
+                    output_dir,
+                    output_format or self.config.output_format,
+                    config_kwargs
+                ): pdf_file
+                for pdf_file in pdf_files
+            }
+            
+            for future in as_completed(future_to_file):
+                pdf_file = future_to_file[future]
+                try:
+                    result_path = future.result()
+                    output_paths.append(result_path)
+                    logger.info(f"[OK] {pdf_file.name}")
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"[FAIL] {pdf_file.name}: {e}")
+        
+        logger.info(f"Done: {len(output_paths)}/{count} files converted"
+                    f"{f', {failed} failed' if failed else ''}")
         return output_paths
 
+
+def _convert_single_file(
+    pdf_path: Path,
+    output_dir: Path,
+    output_format: str,
+    config_kwargs: dict
+) -> Path:
+    """Module-level function for multiprocessing (must be picklable).
+    
+    Creates a fresh DocToMd instance in the worker process and converts one file.
+    """
+    pipeline = DocToMd(**config_kwargs)
+    return pipeline.run(pdf_path, output_dir, output_format=output_format)
 
 
 # Alias for backward compatibility

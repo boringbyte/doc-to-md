@@ -200,3 +200,29 @@ def test_convert_directory_with_output_format(mock_convert, tmp_path):
     assert len(results) == 1
     assert results[0].suffix == ".json"
     assert results[0].exists()
+
+
+@patch("doc_to_md.pipeline.DocToMd._convert_directory_parallel")
+def test_convert_directory_with_workers(mock_parallel, tmp_path):
+    """Test convert_directory with workers > 1 dispatches to parallel method."""
+    mock_parallel.return_value = [tmp_path / "doc0.md", tmp_path / "doc1.md"]
+    
+    # Create 3 dummy PDF files
+    for i in range(3):
+        (tmp_path / f"doc{i}.pdf").write_bytes(b"dummy")
+    
+    output_dir = tmp_path / "output"
+    pipe = DocToMd()
+    
+    # workers > 1 should call _convert_directory_parallel
+    results = pipe.convert_directory(tmp_path, output_dir=output_dir, workers=2)
+    assert mock_parallel.called
+    assert len(results) == 2  # returns what mock returned
+    
+    # Verify it was called with the right args
+    call_args = mock_parallel.call_args
+    assert len(call_args[0][0]) == 3  # 3 pdf files
+    assert call_args[0][1] == output_dir  # output_dir
+    assert call_args[0][3] == 2  # num_workers
+
+

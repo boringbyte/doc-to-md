@@ -78,10 +78,12 @@ def cmd_batch(args: argparse.Namespace) -> int:
     )
     
     limit = getattr(args, 'limit', None)
+    workers = getattr(args, 'workers', None)
     output_paths = pipeline.convert_directory(
         input_dir,
         output_dir=output_dir,
-        limit=limit
+        limit=limit,
+        workers=workers
     )
     
     if not output_paths:
@@ -217,6 +219,12 @@ def main() -> int:
         type=int,
         default=None,
         help='Max number of PDF files to process (default: all)'
+    )
+    batch_parser.add_argument(
+        '--workers', '-w',
+        type=int,
+        default=None,
+        help='Number of parallel workers for processing (default: 1 = sequential)'
     )
     batch_parser.set_defaults(func=cmd_batch)
     
