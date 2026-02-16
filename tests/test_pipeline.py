@@ -175,7 +175,9 @@ def test_convert_directory_with_limit(mock_convert, tmp_path):
     assert len(results) == 2
     
     # Process all
-    results_all = pipe.convert_directory(tmp_path, output_dir=output_dir)
+    # Since doc0 and doc1 already exist, they will be skipped if overwrite=False (default)
+    # So we set overwrite=True to get all 5 again, or just expect 5 if we want to bypass skip
+    results_all = pipe.convert_directory(tmp_path, output_dir=output_dir, overwrite=True)
     assert len(results_all) == 5
 
 
@@ -215,7 +217,8 @@ def test_convert_directory_with_workers(mock_parallel, tmp_path):
     pipe = DocToMd()
     
     # workers > 1 should call _convert_directory_parallel
-    results = pipe.convert_directory(tmp_path, output_dir=output_dir, workers=2)
+    # We set overwrite=True to ensure it doesn't skip if run multiple times (though here it's first run)
+    results = pipe.convert_directory(tmp_path, output_dir=output_dir, workers=2, overwrite=True)
     assert mock_parallel.called
     assert len(results) == 2  # returns what mock returned
     
@@ -224,5 +227,46 @@ def test_convert_directory_with_workers(mock_parallel, tmp_path):
     assert len(call_args[0][0]) == 3  # 3 pdf files
     assert call_args[0][1] == output_dir  # output_dir
     assert call_args[0][3] == 2  # num_workers
+
+
+@patch("doc_to_md.pipeline.DocToMd.run")
+def test_convert_directory_skip_existing(mock_run, tmp_path):
+    """Test convert_directory skips files that already exist when overwrite=False."""
+    # Create input and output dirs
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    
+    # Create 2 input PDF files
+    (input_dir / "doc1.pdf").write_bytes(b"pdf1")
+    (input_dir / "doc2.pdf").write_bytes(b"pdf2")
+    
+    # Pretend doc1.md already exists in output
+    (output_dir / "doc1.md").write_text("existing")
+    
+    pipe = DocToMd(overwrite=False)
+    
+    # Run conversion
+    # Only doc2.pdf should be processed because doc1.md exists
+    mock_run.side_effect = lambda path, out, output_format=None: out / (path.stem + ".md")
+    
+    results = pipe.convert_directory(input_dir, output_dir=output_dir)
+    
+    assert len(results) == 1
+    assert "doc2" in str(results[0])
+    assert mock_run.call_count == 1
+    
+    # Verify doc1 was skipped
+    processed_files = [args[0].name for args, _ in mock_run.call_args_list]
+    assert "doc1.pdf" not in processed_files
+    assert "doc2.pdf" in processed_files
+    
+    # Now try with overwrite=True
+    mock_run.reset_mock()
+    mock_run.side_effect = lambda path, out, output_format=None: out / (path.stem + ".md")
+    results = pipe.convert_directory(input_dir, output_dir=output_dir, overwrite=True)
+    assert len(results) == 2
+    assert mock_run.call_count == 2
 
 

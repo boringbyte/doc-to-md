@@ -79,11 +79,13 @@ def cmd_batch(args: argparse.Namespace) -> int:
     
     limit = getattr(args, 'limit', None)
     workers = getattr(args, 'workers', None)
+    overwrite = getattr(args, 'overwrite', None)
     output_paths = pipeline.convert_directory(
         input_dir,
         output_dir=output_dir,
         limit=limit,
-        workers=workers
+        workers=workers,
+        overwrite=overwrite
     )
     
     if not output_paths:
@@ -225,6 +227,12 @@ def main() -> int:
         type=int,
         default=None,
         help='Number of parallel workers for processing (default: 1 = sequential)'
+    )
+    batch_parser.add_argument(
+        '--overwrite',
+        action='store_true',
+        default=False,
+        help='Overwrite existing files (default: False, skips existing)'
     )
     batch_parser.set_defaults(func=cmd_batch)
     

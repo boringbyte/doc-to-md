@@ -3,6 +3,7 @@
 import json
 import logging
 import tempfile
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,7 @@ class PipelineConfig:
     
     # Performance
     workers: int = 1  # Number of parallel workers for batch processing
+    overwrite: bool = False  # If False (default), skip files that already have output
     
     # Post-processing flags
     run_cleanup: bool = True
@@ -266,6 +268,9 @@ class DocToMd:
         input_path = Path(input_path)
         output_format = output_format or self.config.output_format
         
+        logger.info(f"Started processing: {input_path.name}")
+        start_time = time.time()
+        
         # Handle multiple formats
         if isinstance(output_format, str) and ',' in output_format:
             output_format = [f.strip() for f in output_format.split(',')]
@@ -277,10 +282,17 @@ class DocToMd:
             for fmt in output_format:
                 current_output = self._resolve_output_path(input_path, output_path, fmt)
                 results.append(self.convert_to_file(input_path, current_output, fmt, conversion_result=result))
+            
+            end_time = time.time()
+            logger.info(f"Finished processing: {input_path.name} in {end_time - start_time:.2f}s")
             return results[0] if len(results) == 1 else results
         
         resolved_output = self._resolve_output_path(input_path, output_path, output_format)
-        return self.convert_to_file(input_path, resolved_output, output_format)
+        final_path = self.convert_to_file(input_path, resolved_output, output_format)
+        
+        end_time = time.time()
+        logger.info(f"Finished processing: {input_path.name} in {end_time - start_time:.2f}s")
+        return final_path
     
     @staticmethod
     def _resolve_output_path(
@@ -385,7 +397,8 @@ class DocToMd:
         pattern: str = "*.pdf",
         limit: Optional[int] = None,
         output_format: Optional[str] = None,
-        workers: Optional[int] = None
+        workers: Optional[int] = None,
+        overwrite: Optional[bool] = None
     ) -> list[Path]:
         """Convert all PDFs in a directory.
         
@@ -396,6 +409,7 @@ class DocToMd:
             limit: Max number of files to process (default: None = all).
             output_format: Override output format (e.g. "markdown", "json", "markdown,json").
             workers: Number of parallel workers (default: from config, 1 = sequential).
+            overwrite: Whether to overwrite existing files (default: from config, False).
             
         Returns:
             List of output file paths.
@@ -412,16 +426,58 @@ class DocToMd:
         if limit and limit > 0:
             pdf_files = pdf_files[:limit]
         
+        should_overwrite = overwrite if overwrite is not None else self.config.overwrite
+        skipped_files = []
+        
+        if not should_overwrite:
+            to_process = []
+            fmt = output_format or self.config.output_format
+            
+            # Normalize formats
+            if isinstance(fmt, str):
+                formats = [f.strip() for f in fmt.split(',')]
+            elif isinstance(fmt, list):
+                formats = fmt
+            else:
+                formats = [fmt]
+            
+            for pdf_file in pdf_files:
+                all_exist = True
+                for f in formats:
+                    out_path = self._resolve_output_path(pdf_file, output_dir, f)
+                    if not out_path.exists():
+                        all_exist = False
+                        break
+                
+                if all_exist:
+                    skipped_files.append(pdf_file)
+                else:
+                    to_process.append(pdf_file)
+            
+            if skipped_files:
+                logger.info(f"Skipping {len(skipped_files)} files as they already exist: {[f.name for f in skipped_files]}")
+            pdf_files = to_process
+            
         num_workers = workers or self.config.workers
+        batch_start_time = time.time()
         
         if num_workers > 1 and len(pdf_files) > 1:
-            return self._convert_directory_parallel(
+            output_paths = self._convert_directory_parallel(
                 pdf_files, output_dir, output_format, num_workers
             )
+        else:
+            output_paths = self._convert_directory_sequential(
+                pdf_files, output_dir, output_format
+            )
+            
+        batch_end_time = time.time()
+        duration = batch_end_time - batch_start_time
+        logger.info(f"Batch processing completed: {len(output_paths)} files processed in {duration:.2f}s")
+        if len(output_paths) < total:
+            skipped = len(skipped_files) if not should_overwrite else 0
+            logger.info(f"({total} files total: {len(output_paths)} processed, {skipped} skipped)")
         
-        return self._convert_directory_sequential(
-            pdf_files, output_dir, output_format
-        )
+        return output_paths
     
     def _convert_directory_sequential(
         self,
@@ -436,13 +492,12 @@ class DocToMd:
         output_paths = []
         for i, pdf_file in enumerate(pdf_files, 1):
             try:
-                logger.info(f"[{i}/{count}] Converting {pdf_file.name}")
+                # Timing is now handled inside run()
                 result_path = self.run(pdf_file, output_dir, output_format=output_format)
                 output_paths.append(result_path)
             except Exception as e:
-                logger.error(f"[{i}/{count}] Failed {pdf_file.name}: {e}")
+                logger.error(f"Failed {pdf_file.name}: {e}")
         
-        logger.info(f"Done: {len(output_paths)}/{count} files converted")
         return output_paths
     
     def _convert_directory_parallel(
@@ -484,13 +539,10 @@ class DocToMd:
                 try:
                     result_path = future.result()
                     output_paths.append(result_path)
-                    logger.info(f"[OK] {pdf_file.name}")
                 except Exception as e:
                     failed += 1
                     logger.error(f"[FAIL] {pdf_file.name}: {e}")
         
-        logger.info(f"Done: {len(output_paths)}/{count} files converted"
-                    f"{f', {failed} failed' if failed else ''}")
         return output_paths
 
 
