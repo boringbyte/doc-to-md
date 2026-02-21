@@ -45,22 +45,53 @@ class PyMuPDFConverter(PDFConverterBase):
         """
         path = Path(pdf_path)
         
+        # First, open to get TOC and metadata so we can exclude physical TOC pages
+        doc = pymupdf.open(str(path))
+        try:
+            toc = self._extract_toc_from_doc(doc)
+            metadata = self._extract_metadata_from_doc(doc, path)
+            page_count = doc.page_count
+        finally:
+            doc.close()
+            
+        # Determine physical pages to process by excluding TOC pages if clearly identified
+        pages_to_process = None
+        if toc:
+            exclude_start = None
+            exclude_end = None
+            for i, item in enumerate(toc):
+                title_lower = item.title.strip().lower()
+                if exclude_start is None:
+                    if title_lower in ["table of contents", "contents"]:
+                        exclude_start = item.page_number
+                        # Find the next item that points to a later page
+                        for j in range(i + 1, len(toc)):
+                            if toc[j].page_number > exclude_start:
+                                exclude_end = toc[j].page_number
+                                break
+                        if exclude_end is None:
+                            # If no subsequent item has a higher page number, exclude just this start page
+                            exclude_end = exclude_start + 1
+                        break
+            
+            if exclude_start is not None:
+                # `item.page_number` is 1-based. We want 0-based for internal exclusion lists.
+                exclude_indices = list(range(exclude_start - 1, exclude_end - 1))
+                exclude_indices = [p for p in exclude_indices if 0 <= p < page_count]
+                
+                if exclude_indices:
+                    pages_to_process = [p for p in range(page_count) if p not in exclude_indices]
+                    logger.debug(f"Excluding TOC pages (0-based): {exclude_indices}")
+
         # Extract markdown via pymupdf4llm (opens/closes internally)
         md_text = pymupdf4llm.to_markdown(
             str(path),
+            pages=pages_to_process,
             page_chunks=False,
             write_images=False,
             header=False,
             footer=False,
         )
-        
-        # Single open for TOC + metadata (instead of 2 separate opens)
-        doc = pymupdf.open(str(path))
-        try:
-            toc = self._extract_toc_from_doc(doc)
-            metadata = self._extract_metadata_from_doc(doc, path)
-        finally:
-            doc.close()
         
         # Extract tables from markdown (no file I/O needed)
         tables = self._extract_tables_from_markdown(md_text)

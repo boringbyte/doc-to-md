@@ -190,7 +190,7 @@ class ConversionResult:
     chunks: list[Chunk] = field(default_factory=list)
     embedded_results: list["ConversionResult"] = field(default_factory=list)
     
-    def to_dict(self) -> dict:
+    def to_dict(self, include_embedded: bool = True) -> dict:
         result = {
             "markdown": self.markdown,
             "toc": [t.to_dict() for t in self.toc],
@@ -200,7 +200,17 @@ class ConversionResult:
             "chunks": [c.to_dict() for c in self.chunks]
         }
         if self.embedded_results:
-            result["embedded_documents"] = [
-                er.to_dict() for er in self.embedded_results
-            ]
+            if include_embedded:
+                result["embedded_documents"] = [
+                    er.to_dict() for er in self.embedded_results
+                ]
+            else:
+                # Summary mode: include metadata and stats but not full content
+                result["embedded_documents"] = [
+                    {
+                        "metadata": er.metadata.to_dict(),
+                        "chunk_count": len(er.chunks),
+                        "is_embedded": True
+                    } for er in self.embedded_results
+                ]
         return result

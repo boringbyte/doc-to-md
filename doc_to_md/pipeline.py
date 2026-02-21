@@ -325,9 +325,30 @@ class DocToMd:
         output_path = Path(output_path)
         output_format = output_format or self.config.output_format
         
+        # Save embedded PDF results first if they exist
+        embedded_paths = []
+        if result.embedded_results:
+            embedded_paths = self._save_embedded_results(
+                result.embedded_results,
+                output_path,
+                output_format
+            )
+        
         if output_format == "json":
+            result_dict = result.to_dict(include_embedded=False)
+            
+            # Inject relative paths to embedded results into the parent JSON
+            if embedded_paths and "embedded_documents" in result_dict:
+                for i, emb_doc in enumerate(result_dict["embedded_documents"]):
+                    if i < len(embedded_paths):
+                        # Store relative path from the parent JSON file's directory
+                        rel_path = embedded_paths[i].name
+                        # If it's in a sub-dir (which it is), include the sub-dir name
+                        sub_dir_name = output_path.stem
+                        emb_doc["output_path"] = f"{sub_dir_name}/{rel_path}"
+            
             with open(output_path, 'w', encoding='utf-8') as f:
-                json.dump(result.to_dict(), f, indent=2, ensure_ascii=False)
+                json.dump(result_dict, f, indent=2, ensure_ascii=False)
         else:
             markdown = generate_markdown_output(
                 result.chunks if result.chunks else [],
@@ -342,15 +363,6 @@ class DocToMd:
                 f.write(markdown)
         
         logger.info(f"Output saved to {output_path}")
-        
-        # Save embedded PDF results to a subdirectory
-        if result.embedded_results:
-            self._save_embedded_results(
-                result.embedded_results,
-                output_path,
-                output_format
-            )
-        
         return output_path
     
     def _save_embedded_results(
