@@ -42,11 +42,16 @@ def cmd_convert(args: argparse.Namespace) -> int:
         max_chunk_size=args.max_chunk_size,
         output_format=args.format,
         include_frontmatter=not args.no_frontmatter,
+        process_embedded=not args.no_embedded,
     )
     
     try:
-        result_path = pipeline.run(pdf_path, output_path)
-        logger.info(f"[OK] Converted: {pdf_path.name} -> {result_path.name}")
+        result = pipeline.run(pdf_path, output_path)
+        if isinstance(result, list):
+            paths = ", ".join([p.name for p in result])
+            logger.info(f"[OK] Converted: {pdf_path.name} -> [{paths}]")
+        else:
+            logger.info(f"[OK] Converted: {pdf_path.name} -> {result.name}")
         return 0
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -59,38 +64,33 @@ def cmd_convert(args: argparse.Namespace) -> int:
 def cmd_batch(args: argparse.Namespace) -> int:
     """Handle the batch command for directory processing."""
     input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir) if args.output_dir else input_dir / "converted"
+    output_dir = Path(args.output_dir) if args.output_dir else None
     
     if not input_dir.exists():
         logger.error(f"Error: Directory not found: {input_dir}")
         return 1
     
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
     # Configure pipeline using simplified API
     pipeline = DocToMd(
         output_format=args.format,
         include_frontmatter=not args.no_frontmatter,
+        process_embedded=not args.no_embedded,
     )
     
-    pdf_files = list(input_dir.glob("*.pdf"))
-    if not pdf_files:
-        logger.error(f"No PDF files found in {input_dir}")
-        return 0
+    limit = getattr(args, 'limit', None)
+    workers = getattr(args, 'workers', None)
+    overwrite = getattr(args, 'overwrite', None)
+    output_paths = pipeline.convert_directory(
+        input_dir,
+        output_dir=output_dir,
+        limit=limit,
+        workers=workers,
+        overwrite=overwrite
+    )
     
-    logger.info(f"Found {len(pdf_files)} PDF files")
-    
-    success_count = 0
-    for pdf_file in pdf_files:
-        try:
-            result_path = pipeline.run(pdf_file, output_dir / pdf_file.stem)
-            logger.info(f"[OK] {pdf_file.name}")
-            success_count += 1
-        except Exception as e:
-            logger.error(f"[FAIL] {pdf_file.name}: {e}")
-    
-    logger.info(f"\nConverted {success_count}/{len(pdf_files)} files")
-    return 0 if success_count == len(pdf_files) else 1
+    if not output_paths:
+        return 1
+    return 0
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -161,9 +161,8 @@ def main() -> int:
     )
     convert_parser.add_argument(
         '-f', '--format',
-        choices=['markdown', 'json'],
         default='markdown',
-        help='Output format (default: markdown)'
+        help='Output format(s), e.g., "markdown", "json", or "markdown,json" (default: markdown)'
     )
     convert_parser.add_argument(
         '--chunk-size',
@@ -182,6 +181,11 @@ def main() -> int:
         action='store_true',
         help='Disable YAML frontmatter in output'
     )
+    convert_parser.add_argument(
+        '--no-embedded',
+        action='store_true',
+        help='Skip processing embedded PDF attachments'
+    )
     convert_parser.set_defaults(func=cmd_convert)
     
     # Batch command
@@ -199,14 +203,36 @@ def main() -> int:
     )
     batch_parser.add_argument(
         '-f', '--format',
-        choices=['markdown', 'json'],
         default='markdown',
-        help='Output format (default: markdown)'
+        help='Output format(s), e.g., "markdown", "json", or "markdown,json" (default: markdown)'
     )
     batch_parser.add_argument(
         '--no-frontmatter',
         action='store_true',
         help='Disable YAML frontmatter in output'
+    )
+    batch_parser.add_argument(
+        '--no-embedded',
+        action='store_true',
+        help='Skip processing embedded PDF attachments'
+    )
+    batch_parser.add_argument(
+        '--limit', '-n',
+        type=int,
+        default=None,
+        help='Max number of PDF files to process (default: all)'
+    )
+    batch_parser.add_argument(
+        '--workers', '-w',
+        type=int,
+        default=None,
+        help='Number of parallel workers for processing (default: 1 = sequential)'
+    )
+    batch_parser.add_argument(
+        '--overwrite',
+        action='store_true',
+        default=False,
+        help='Overwrite existing files (default: False, skips existing)'
     )
     batch_parser.set_defaults(func=cmd_batch)
     

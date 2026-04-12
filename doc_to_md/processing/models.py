@@ -56,6 +56,7 @@ class DocumentMetadata:
     title: Optional[str] = None
     author: Optional[str] = None
     subject: Optional[str] = None
+    keywords: Optional[str] = None
     creation_date: Optional[str] = None
     modification_date: Optional[str] = None
     page_count: int = 0
@@ -66,6 +67,7 @@ class DocumentMetadata:
             "title": self.title,
             "author": self.author,
             "subject": self.subject,
+            "keywords": [k.strip() for k in self.keywords.split(",")] if self.keywords else [],
             "creation_date": self.creation_date,
             "modification_date": self.modification_date,
             "page_count": self.page_count,
@@ -110,8 +112,11 @@ class Chunk:
     content: str
     section_path: list[str]
     section_level: int
-    page_number: int
+    page_start: int
+    page_end: int
+    page_range: str
     content_type: ContentType
+    parent_section: Optional[str] = None
     preceding_section: Optional[str] = None
     following_section: Optional[str] = None
     has_tables: bool = False
@@ -122,8 +127,11 @@ class Chunk:
         """Generate YAML frontmatter for markdown output."""
         lines = ["---"]
         lines.append(f"section_path: {self.section_path}")
+        lines.append(f"parent_section: \"{self.parent_section}\"")
         lines.append(f"section_level: {self.section_level}")
-        lines.append(f"page_number: {self.page_number}")
+        lines.append(f"page_start: {self.page_start}")
+        lines.append(f"page_end: {self.page_end}")
+        lines.append(f"page_range: \"{self.page_range}\"")
         lines.append(f"content_type: {self.content_type.value}")
         if self.preceding_section:
             lines.append(f"preceding_section: \"{self.preceding_section}\"")
@@ -143,14 +151,31 @@ class Chunk:
         return {
             "content": self.content,
             "section_path": self.section_path,
+            "parent_section": self.parent_section,
             "section_level": self.section_level,
-            "page_number": self.page_number,
+            "page_start": self.page_start,
+            "page_end": self.page_end,
+            "page_range": self.page_range,
             "content_type": self.content_type.value,
             "preceding_section": self.preceding_section,
             "following_section": self.following_section,
             "has_tables": self.has_tables,
             "has_code_blocks": self.has_code_blocks,
             "chunk_index": self.chunk_index
+        }
+
+
+@dataclass
+class EmbeddedPDF:
+    """Represents an embedded/attached PDF within a parent PDF."""
+    name: str  # Internal name in the PDF portfolio
+    filename: str  # Clean filename for output
+    data: bytes = field(repr=False)  # Raw PDF bytes
+    
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "filename": self.filename,
         }
 
 
@@ -163,9 +188,10 @@ class ConversionResult:
     metadata: DocumentMetadata = field(default_factory=DocumentMetadata)
     sections: list[Section] = field(default_factory=list)
     chunks: list[Chunk] = field(default_factory=list)
+    embedded_results: list["ConversionResult"] = field(default_factory=list)
     
-    def to_dict(self) -> dict:
-        return {
+    def to_dict(self, include_embedded: bool = True) -> dict:
+        result = {
             "markdown": self.markdown,
             "toc": [t.to_dict() for t in self.toc],
             "tables": [t.to_dict() for t in self.tables],
@@ -173,3 +199,18 @@ class ConversionResult:
             "sections": [s.to_dict() for s in self.sections],
             "chunks": [c.to_dict() for c in self.chunks]
         }
+        if self.embedded_results:
+            if include_embedded:
+                result["embedded_documents"] = [
+                    er.to_dict() for er in self.embedded_results
+                ]
+            else:
+                # Summary mode: include metadata and stats but not full content
+                result["embedded_documents"] = [
+                    {
+                        "metadata": er.metadata.to_dict(),
+                        "chunk_count": len(er.chunks),
+                        "is_embedded": True
+                    } for er in self.embedded_results
+                ]
+        return result
